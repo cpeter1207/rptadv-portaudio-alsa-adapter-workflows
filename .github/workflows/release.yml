@@ -1,0 +1,158 @@
+name: Verified adapter release
+
+on:
+  workflow_call:
+    inputs:
+      code_ref:
+        description: Immutable adapter-source revision to release.
+        type: string
+        required: true
+      tag:
+        description: Release tag.
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  source-revision:
+    name: Verify merged Debian 13 source revision
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: cpeter1207/rptadv-portaudio-alsa-adapter
+          ref: main
+          fetch-depth: 0
+      - name: Require an immutable main revision, semantic tag, and matching Debian upstream version
+        env:
+          CODE_REF: ${{ inputs.code_ref }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]
+          code_commit="$(git rev-parse "$CODE_REF^{commit}")"
+          git merge-base --is-ancestor "$code_commit" origin/main
+
+          release_version="${TAG#v}"
+          case "$release_version" in
+            *-*)
+              release_base="${release_version%%-*}"
+              release_prerelease="${release_version#*-}"
+              normalized_upstream="${release_base}~${release_prerelease//./}"
+              ;;
+            *) normalized_upstream="$release_version" ;;
+          esac
+
+          changelog="$(mktemp)"
+          trap 'rm -f "$changelog"' EXIT
+          git show "$code_commit:debian/changelog" > "$changelog"
+          debian_version="$(dpkg-parsechangelog -l"$changelog" -S Version)"
+          debian_without_epoch="${debian_version#*:}"
+          debian_upstream="${debian_without_epoch%-*}"
+          test "$normalized_upstream" = "$debian_upstream"
+
+  binaries:
+    needs: source-revision
+    name: Debian 13 ${{ matrix.arch }} artifacts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ghcr.io/cpeter1207/rptadv-portaudio-alsa-adapter-quality:latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: cpeter1207/rptadv-portaudio-alsa-adapter
+          ref: ${{ inputs.code_ref }}
+      - name: Verify native target architecture
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
+      - name: Verify Debian package build prerequisites
+        run: dpkg-query -W cargo rustc
+      - name: Build shared object and Debian packages
+        env:
+          PACKAGE_VERSION: ${{ inputs.tag }}
+        run: |
+          export PACKAGE_VERSION="${PACKAGE_VERSION#v}"
+          make clean all debian-package-check
+          mkdir -p release
+          cp "build/librptadv_portaudio_alsa_adapter.so.1.$PACKAGE_VERSION" release/
+          ln -s "librptadv_portaudio_alsa_adapter.so.1.$PACKAGE_VERSION" \
+            release/librptadv_portaudio_alsa_adapter.so.1
+          ln -s librptadv_portaudio_alsa_adapter.so.1 \
+            release/librptadv_portaudio_alsa_adapter.so
+          cp include/rptadv_portaudio_alsa_adapter/rptadv_portaudio_alsa_adapter.h release/
+          cp build/rptadv_portaudio_alsa_adapter.pc release/
+          tar -C release -czf "rptadv-portaudio-alsa-adapter-${{ inputs.tag }}-debian13-${{ matrix.arch }}.tar.gz" .
+          debian_version="$(dpkg-parsechangelog -S Version)"
+          debian_arch="$(dpkg --print-architecture)"
+          cp "build/debian-source/librptadv-portaudio-alsa-adapter1_${debian_version}_${debian_arch}.deb" release/
+          cp "build/debian-source/librptadv-portaudio-alsa-adapter-dev_${debian_version}_${debian_arch}.deb" release/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shared-library-debian13-${{ matrix.arch }}
+          path: rptadv-portaudio-alsa-adapter-${{ inputs.tag }}-debian13-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: debian-packages-debian13-${{ matrix.arch }}
+          path: release/*.deb
+          if-no-files-found: error
+
+  source:
+    needs: source-revision
+    name: Source archive
+    runs-on: ubuntu-24.04
+    container: ghcr.io/cpeter1207/rptadv-portaudio-alsa-adapter-quality:latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: cpeter1207/rptadv-portaudio-alsa-adapter
+          ref: ${{ inputs.code_ref }}
+      - name: Build and validate release source archive
+        env:
+          PACKAGE_VERSION: ${{ inputs.tag }}
+        run: |
+          export PACKAGE_VERSION="${PACKAGE_VERSION#v}"
+          make distcheck
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-archive
+          path: build/rptadv-portaudio-alsa-adapter-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [binaries, source]
+    name: Publish GitHub release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: cpeter1207/rptadv-portaudio-alsa-adapter
+          ref: ${{ inputs.code_ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: shared-library-*
+          path: release
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: debian-packages-*
+          path: release
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: source-archive
+          path: release
+      - name: Publish release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release create "$TAG" release/*.tar.gz release/*.deb --generate-notes --title "$TAG"

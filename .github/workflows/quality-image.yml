@@ -1,0 +1,82 @@
+name: Publish adapter quality image
+
+on:
+  workflow_call:
+    inputs:
+      code_ref:
+        description: Immutable adapter-source revision containing the quality-image recipe.
+        type: string
+        required: true
+      image_tag:
+        description: GHCR tag for the published multi-architecture image.
+        type: string
+        required: false
+        default: latest
+  workflow_dispatch:
+    inputs:
+      code_ref:
+        description: Immutable adapter-source revision containing the quality-image recipe.
+        type: string
+        required: true
+        default: main
+      image_tag:
+        description: GHCR tag for the published multi-architecture image.
+        type: string
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  native-image:
+    name: Build native ${{ matrix.arch }} quality image
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: cpeter1207/rptadv-portaudio-alsa-adapter
+          ref: ${{ inputs.code_ref }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/quality.Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          provenance: false
+          sbom: false
+          tags: ghcr.io/cpeter1207/rptadv-portaudio-alsa-adapter-quality:${{ inputs.image_tag }}-${{ matrix.arch }}
+
+  manifest:
+    name: Publish multi-architecture quality image
+    needs: native-image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Create native-image manifest
+        env:
+          IMAGE: ghcr.io/cpeter1207/rptadv-portaudio-alsa-adapter-quality
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:$TAG" \
+            "$IMAGE:$TAG-amd64" "$IMAGE:$TAG-arm64"
