@@ -82,6 +82,9 @@ jobs:
         run: |
           export PACKAGE_VERSION="${PACKAGE_VERSION#v}"
           make clean all debian-package-check
+          # The Debian build generates pkg-config metadata in its disposable
+          # source tree. Generate the release copy in this checkout as well.
+          make build/rptadv_portaudio_alsa_adapter.pc
           mkdir -p release
           cp "build/librptadv_portaudio_alsa_adapter.so.1.$PACKAGE_VERSION" release/
           ln -s "librptadv_portaudio_alsa_adapter.so.1.$PACKAGE_VERSION" \
