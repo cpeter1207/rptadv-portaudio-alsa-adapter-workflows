@@ -13,7 +13,9 @@ on:
         required: true
 
 permissions:
+  checks: read
   contents: write
+  pull-requests: read
 
 jobs:
   source-revision:
@@ -28,11 +30,20 @@ jobs:
       - name: Require an immutable main revision, semantic tag, and matching Debian upstream version
         env:
           CODE_REF: ${{ inputs.code_ref }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]
           code_commit="$(git rev-parse "$CODE_REF^{commit}")"
           git merge-base --is-ancestor "$code_commit" origin/main
+
+          pr_head="$(gh api "repos/cpeter1207/rptadv-portaudio-alsa-adapter/commits/$code_commit/pulls" \
+            --jq ".[] | select(.merged_at != null and .merge_commit_sha == \"$code_commit\") | .head.sha")"
+          test -n "$pr_head"
+          quality="$(gh api "repos/cpeter1207/rptadv-portaudio-alsa-adapter/commits/$pr_head/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name | endswith("Required quality gate"))] | sort_by(.id) | last | .conclusion')"
+          test "$quality" = success
 
           release_version="${TAG#v}"
           case "$release_version" in
@@ -74,6 +85,19 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
+      - name: Install released capture ring dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch="$(dpkg --print-architecture)"
+          packages="$(mktemp -d)"
+          trap 'rm -rf "$packages"' EXIT
+          base=https://github.com/cpeter1207
+          curl -fLsS "$base/rptadv-samplerate-adapter/releases/download/v0.1.0-alpha.1/librptadv-samplerate-adapter1_0.1.0.alpha1-1_$arch.deb" -o "$packages/samplerate.deb"
+          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring.deb"
+          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2-dev_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring-dev.deb"
+          apt-get update
+          apt-get install -y --no-install-recommends "$packages"/*.deb
       - name: Verify Debian package build prerequisites
         run: dpkg-query -W cargo rustc
       - name: Build shared object and Debian packages
@@ -119,6 +143,19 @@ jobs:
         with:
           repository: cpeter1207/rptadv-portaudio-alsa-adapter
           ref: ${{ inputs.code_ref }}
+      - name: Install released capture ring dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch="$(dpkg --print-architecture)"
+          packages="$(mktemp -d)"
+          trap 'rm -rf "$packages"' EXIT
+          base=https://github.com/cpeter1207
+          curl -fLsS "$base/rptadv-samplerate-adapter/releases/download/v0.1.0-alpha.1/librptadv-samplerate-adapter1_0.1.0.alpha1-1_$arch.deb" -o "$packages/samplerate.deb"
+          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring.deb"
+          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2-dev_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring-dev.deb"
+          apt-get update
+          apt-get install -y --no-install-recommends "$packages"/*.deb
       - name: Build and validate release source archive
         env:
           PACKAGE_VERSION: ${{ inputs.tag }}
@@ -158,4 +195,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-        run: gh release create "$TAG" release/*.tar.gz release/*.deb --generate-notes --title "$TAG"
+        run: |
+          prerelease=()
+          case "$TAG" in
+            *-*) prerelease=(--prerelease) ;;
+          esac
+          gh release create "$TAG" release/*.tar.gz release/*.deb \
+            --generate-notes --title "$TAG" "${prerelease[@]}"
