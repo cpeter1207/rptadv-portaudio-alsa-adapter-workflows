@@ -22,19 +22,6 @@ jobs:
         with:
           repository: cpeter1207/rptadv-portaudio-alsa-adapter
           ref: ${{ inputs.code_ref || github.sha }}
-      - name: Install released capture ring dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          arch="$(dpkg --print-architecture)"
-          packages="$(mktemp -d)"
-          trap 'rm -rf "$packages"' EXIT
-          base=https://github.com/cpeter1207
-          curl -fLsS "$base/rptadv-samplerate-adapter/releases/download/v0.1.0-alpha.1/librptadv-samplerate-adapter1_0.1.0.alpha1-1_$arch.deb" -o "$packages/samplerate.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2-dev_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring-dev.deb"
-          apt-get update
-          apt-get install -y --no-install-recommends "$packages"/*.deb
       - name: Check formatting, analysis, and documentation concurrently
         run: make -j3 quality
 
@@ -60,19 +47,6 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
-      - name: Install released capture ring dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          arch="$(dpkg --print-architecture)"
-          packages="$(mktemp -d)"
-          trap 'rm -rf "$packages"' EXIT
-          base=https://github.com/cpeter1207
-          curl -fLsS "$base/rptadv-samplerate-adapter/releases/download/v0.1.0-alpha.1/librptadv-samplerate-adapter1_0.1.0.alpha1-1_$arch.deb" -o "$packages/samplerate.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2-dev_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring-dev.deb"
-          apt-get update
-          apt-get install -y --no-install-recommends "$packages"/*.deb
       - name: Build, test, package, and stage installation
         run: make platform-verify
       - name: Verify production coverage

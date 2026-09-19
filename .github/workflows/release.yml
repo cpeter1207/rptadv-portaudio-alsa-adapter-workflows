@@ -85,19 +85,6 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: test "$(dpkg --print-architecture)" = "$EXPECTED_ARCH"
-      - name: Install released capture ring dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          arch="$(dpkg --print-architecture)"
-          packages="$(mktemp -d)"
-          trap 'rm -rf "$packages"' EXIT
-          base=https://github.com/cpeter1207
-          curl -fLsS "$base/rptadv-samplerate-adapter/releases/download/v0.1.0-alpha.1/librptadv-samplerate-adapter1_0.1.0.alpha1-1_$arch.deb" -o "$packages/samplerate.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2-dev_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring-dev.deb"
-          apt-get update
-          apt-get install -y --no-install-recommends "$packages"/*.deb
       - name: Verify Debian package build prerequisites
         run: dpkg-query -W cargo rustc
       - name: Build shared object and Debian packages
@@ -110,17 +97,17 @@ jobs:
           # source tree. Generate the release copy in this checkout as well.
           make build/rptadv_portaudio_alsa_adapter.pc
           mkdir -p release
-          cp "build/librptadv_portaudio_alsa_adapter.so.1.$PACKAGE_VERSION" release/
-          ln -s "librptadv_portaudio_alsa_adapter.so.1.$PACKAGE_VERSION" \
-            release/librptadv_portaudio_alsa_adapter.so.1
-          ln -s librptadv_portaudio_alsa_adapter.so.1 \
+          cp "build/librptadv_portaudio_alsa_adapter.so.2.$PACKAGE_VERSION" release/
+          ln -s "librptadv_portaudio_alsa_adapter.so.2.$PACKAGE_VERSION" \
+            release/librptadv_portaudio_alsa_adapter.so.2
+          ln -s librptadv_portaudio_alsa_adapter.so.2 \
             release/librptadv_portaudio_alsa_adapter.so
           cp include/rptadv_portaudio_alsa_adapter/rptadv_portaudio_alsa_adapter.h release/
           cp build/rptadv_portaudio_alsa_adapter.pc release/
           tar -C release -czf "rptadv-portaudio-alsa-adapter-${{ inputs.tag }}-debian13-${{ matrix.arch }}.tar.gz" .
           debian_version="$(dpkg-parsechangelog -S Version)"
           debian_arch="$(dpkg --print-architecture)"
-          cp "build/debian-source/librptadv-portaudio-alsa-adapter1_${debian_version}_${debian_arch}.deb" release/
+          cp "build/debian-source/librptadv-portaudio-alsa-adapter2_${debian_version}_${debian_arch}.deb" release/
           cp "build/debian-source/librptadv-portaudio-alsa-adapter-dev_${debian_version}_${debian_arch}.deb" release/
       - uses: actions/upload-artifact@v7
         with:
@@ -143,19 +130,6 @@ jobs:
         with:
           repository: cpeter1207/rptadv-portaudio-alsa-adapter
           ref: ${{ inputs.code_ref }}
-      - name: Install released capture ring dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          arch="$(dpkg --print-architecture)"
-          packages="$(mktemp -d)"
-          trap 'rm -rf "$packages"' EXIT
-          base=https://github.com/cpeter1207
-          curl -fLsS "$base/rptadv-samplerate-adapter/releases/download/v0.1.0-alpha.1/librptadv-samplerate-adapter1_0.1.0.alpha1-1_$arch.deb" -o "$packages/samplerate.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring.deb"
-          curl -fLsS "$base/rate_adjusting_pcm_ring/releases/download/v2.0.0-alpha.1/librate-adjusting-pcm-ring2-dev_2.0.0.alpha1-1_$arch.deb" -o "$packages/ring-dev.deb"
-          apt-get update
-          apt-get install -y --no-install-recommends "$packages"/*.deb
       - name: Build and validate release source archive
         env:
           PACKAGE_VERSION: ${{ inputs.tag }}
