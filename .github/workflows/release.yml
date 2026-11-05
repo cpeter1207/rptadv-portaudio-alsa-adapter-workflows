@@ -2,6 +2,9 @@ name: Verified adapter release
 
 on:
   workflow_call:
+    secrets:
+      APT_INDEX_DISPATCH_TOKEN:
+        required: false
     inputs:
       code_ref:
         description: Immutable adapter-source revision to release.
@@ -146,6 +149,8 @@ jobs:
     needs: [binaries, source]
     name: Publish GitHub release
     runs-on: ubuntu-24.04
+    env:
+      INDEX_TOKEN: ${{ secrets.APT_INDEX_DISPATCH_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -176,3 +181,13 @@ jobs:
           esac
           gh release create "$TAG" release/*.tar.gz release/*.deb \
             --generate-notes --title "$TAG" "${prerelease[@]}"
+      - name: Refresh signed package index
+        if: env.INDEX_TOKEN != ''
+        uses: cpeter1207/USBRadioPlus-Workflows/actions/dispatch-package-index@main
+        with:
+          package-repository: ${{ github.repository }}
+          package-tag: ${{ inputs.tag }}
+          token: ${{ secrets.APT_INDEX_DISPATCH_TOKEN }}
+      - name: Report unavailable package-index dispatch
+        if: env.INDEX_TOKEN == ''
+        run: echo '::notice::APT_INDEX_DISPATCH_TOKEN was not supplied; release assets are published, but the signed package index was not refreshed.'
