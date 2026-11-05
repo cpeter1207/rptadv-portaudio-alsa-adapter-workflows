@@ -36,3 +36,9 @@ native runners only; do not use QEMU emulation for validation.
 
 Workflow-only changes are validated by `validate.yml` with Actionlint. They
 remain independently repairable when production quality is failing.
+
+After a successful release, the optional `APT_INDEX_DISPATCH_TOKEN` secret
+triggers the shared signed-package index. The source caller passes this secret
+explicitly. It must be a fine-grained token with `contents: write` access only
+to `cpeter1207/USBRadioPlus`. Without it, the release succeeds and reports that
+the index was not refreshed.
